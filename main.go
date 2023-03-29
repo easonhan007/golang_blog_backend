@@ -5,8 +5,8 @@ import (
 	"context"
 	"log"
 
+	"github.com/foolin/goview/supports/ginview"
 	"github.com/gin-gonic/gin"
-
 	"github.com/go-redis/redis/v8"
 )
 
@@ -26,6 +26,15 @@ func main() {
 	}
 
 	router := gin.Default()
+	router.HTMLRender = ginview.Default()
+
+	router.GET("/", func(c *gin.Context) {
+		handlers.RenderPosts(c, client, ctx)
+	})
+
+	router.GET("/:id", func(c *gin.Context) {
+		handlers.RenderPostByID(c, client, ctx)
+	})
 
 	router.GET("/posts", func(c *gin.Context) {
 		handlers.GetPosts(c, client, ctx)

@@ -1,0 +1,14 @@
+{{ define "contents" }}
+	<article class="container mx-auto m-10">
+		<div class="" id="post">
+			{{ .post.Body }}
+		</div>
+	</article>
+
+	<script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/lib/marked.umd.min.js"></script>
+	<script>
+		let post = document.querySelector('#post');
+		post.innerHTML = marked.parse(post.innerHTML);
+		post.classList.add("prose", "prose-lg", "md:max-w-none", "px-2");
+	</script>
+{{ end }}

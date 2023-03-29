@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +20,7 @@ import (
 )
 
 type Post struct {
+	ID      string   `json:"id"`
 	Title   string   `json:"title"`
 	Body    string   `json:"body"`
 	Created string   `json:"created"`
@@ -41,17 +44,66 @@ func GetPosts(c *gin.Context, client *redis.Client, ctx context.Context) {
 	}
 	// Retrieve the list of post IDs from the zset in Redis
 	start := (page - 1) * 20
-	end := start + 19
-	ids, err := client.ZRevRange(ctx, POST_SET, int64(start), int64(end)).Result()
+	response, err := getPosts(client, ctx, start)
 	if err != nil {
 		c.IndentedJSON(http.StatusNotFound, gin.H{
-			"error": "Error retrieving post IDs",
+			"error": "can not get any posts from redis",
 		})
 		return
 	}
+	c.IndentedJSON(http.StatusOK, response)
+
+}
+
+func RenderPosts(c *gin.Context, client *redis.Client, ctx context.Context) {
+	// Retrieve the page number from the query parameters
+
+	pageStr := c.DefaultQuery("page", "1")
+	page, err := strconv.Atoi(pageStr)
+	if err != nil {
+		c.HTML(http.StatusNotFound, "error", gin.H{
+			"error": "can not parse page to int",
+		})
+		return
+	}
+	// Retrieve the list of post IDs from the zset in Redis
+	start := (page - 1) * 20
+	response, err := getPosts(client, ctx, start)
+	if err != nil {
+		c.HTML(http.StatusNotFound, "error.tmpl", gin.H{
+			"error": "can not get any posts from redis",
+		})
+		return
+	}
+	c.HTML(http.StatusOK, "index", gin.H{
+		"title": "Ethan Han's Blog",
+		"posts": response,
+		"rand_index": func() int {
+			rand.Seed(time.Now().UnixNano())
+			return rand.Intn(100)
+		},
+		"truncate": func(s string, maxLength int) string {
+			runes := []rune(s)
+			if len(runes) > maxLength {
+				truncatedRunes := runes[0:maxLength]
+				s = string(truncatedRunes)
+			}
+			return s + "..."
+		},
+	})
+
+}
+
+func getPosts(client *redis.Client, ctx context.Context, start int) ([]Post, error) {
+	var response []Post
+
+	end := start + 19
+	ids, err := client.ZRevRange(ctx, POST_SET, int64(start), int64(end)).Result()
+	if err != nil {
+		return response, errors.New("Can not get posts")
+	}
 
 	// Retrieve the post data for each ID from Redis
-	var response []Post
 	for _, idStr := range ids {
 		postJSON, err := client.Get(ctx, idStr).Result()
 		if err != nil {
@@ -66,9 +118,7 @@ func GetPosts(c *gin.Context, client *redis.Client, ctx context.Context) {
 		}
 		response = append(response, post)
 	}
-
-	c.IndentedJSON(http.StatusOK, response)
-
+	return response, nil
 }
 
 func Build(c *gin.Context, client *redis.Client, ctx context.Context) {
@@ -106,17 +156,18 @@ func Build(c *gin.Context, client *redis.Client, ctx context.Context) {
 			fmt.Printf("File Name: %s, Title: %s\nCreated: %s\nTags: %v\n", filePath, metadata.Title, metadata.Created, metadata.Tags)
 			msg = append(msg, fmt.Sprintf("Filename: %s, Title: %s, Created: %s, Tags: %v", filePath, metadata.Title, metadata.Created, metadata.Tags))
 
-			metadataBytes, err := json.Marshal(metadata)
-			if err != nil {
-				fmt.Printf("Error marshaling metadata for file %s: %v\n", filePath, err)
-				continue
-			}
 			fileName := strings.Replace(filePath, ".md", "", -1)
 			postKey := POST_PREFIX + strings.Split(fileName, string(os.PathSeparator))[1]
 			date, err := time.Parse(LAYOUT, metadata.Created)
 			if err != nil {
 				fmt.Println("Error parsing date:", err)
 				return
+			}
+			metadata.ID = strings.Split(fileName, string(os.PathSeparator))[1]
+			metadataBytes, err := json.Marshal(metadata)
+			if err != nil {
+				fmt.Printf("Error marshaling metadata for file %s: %v\n", filePath, err)
+				continue
 			}
 
 			timestamp := date.Unix()
@@ -143,9 +194,25 @@ func Build(c *gin.Context, client *redis.Client, ctx context.Context) {
 	c.IndentedJSON(http.StatusOK, msg)
 }
 
+func RenderPostByID(c *gin.Context, client *redis.Client, ctx context.Context) {
+	postID := c.Param("id")
+	post, err := getPostByID(client, ctx, postID)
+
+	if err != nil {
+		c.HTML(http.StatusNotFound, "error", gin.H{
+			"error": fmt.Sprintf("Can not find %s ", postID),
+		})
+		return
+	}
+	c.HTML(http.StatusOK, "show", gin.H{
+		"post":  post,
+		"title": post.Title,
+	})
+}
+
 func GetPostByID(c *gin.Context, client *redis.Client, ctx context.Context) {
 	postID := c.Param("id")
-	postRaw, err := client.Get(ctx, POST_PREFIX+postID).Result()
+	post, err := getPostByID(client, ctx, postID)
 
 	if err != nil {
 		c.IndentedJSON(http.StatusNotFound, gin.H{
@@ -153,8 +220,17 @@ func GetPostByID(c *gin.Context, client *redis.Client, ctx context.Context) {
 		})
 		return
 	}
+	c.IndentedJSON(http.StatusOK, post)
+}
+
+func getPostByID(client *redis.Client, ctx context.Context, postID string) (Post, error) {
 	var post Post
+	postRaw, err := client.Get(ctx, POST_PREFIX+postID).Result()
+
+	if err != nil {
+		return post, errors.New(fmt.Sprintf("can not find post by id %s", postID))
+	}
 	json.Unmarshal([]byte(postRaw), &post)
 
-	c.IndentedJSON(http.StatusOK, post)
+	return post, nil
 }
