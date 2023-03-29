@@ -27,6 +27,7 @@ func main() {
 
 	router := gin.Default()
 	router.HTMLRender = ginview.Default()
+	router.StaticFile("/output.css", "./views/output.css")
 
 	router.GET("/", func(c *gin.Context) {
 		handlers.RenderPosts(c, client, ctx)
