@@ -123,12 +123,24 @@ func getPosts(client *redis.Client, ctx context.Context, start int) ([]Post, err
 }
 
 func Build(c *gin.Context, client *redis.Client, ctx context.Context) {
-	posts_dir := "./posts"
+	// posts_dir := "./posts"
+	posts_dir := os.Getenv("POSTS_DIR")
+	if posts_dir == "" {
+		err_msg := fmt.Sprintln("POSTS_DIR environment variable is not set.")
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{
+			"error": err_msg,
+		})
+		return
+	}
 	files, err := ioutil.ReadDir(posts_dir)
 	if err != nil {
-		fmt.Println("Error reading directory:", err)
-		os.Exit(1)
+		msg := fmt.Sprintln("Error reading directory:", err)
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{
+			"error": msg,
+		})
+		return
 	}
+
 	var msg []string
 	for _, file := range files {
 		if strings.HasSuffix(file.Name(), ".md") {
@@ -137,8 +149,11 @@ func Build(c *gin.Context, client *redis.Client, ctx context.Context) {
 
 			content, err := ioutil.ReadFile(filePath)
 			if err != nil {
-				fmt.Printf("Error reading file %s: %v\n", filePath, err)
-				continue
+				err_msg := fmt.Sprintf("Error reading file %s: %v\n", filePath, err)
+				c.IndentedJSON(http.StatusInternalServerError, gin.H{
+					"error": err_msg,
+				})
+				return
 			}
 
 			// Split the file content into lines
@@ -148,8 +163,11 @@ func Build(c *gin.Context, client *redis.Client, ctx context.Context) {
 			var metadata Post
 			err = json.Unmarshal([]byte(lines[0]), &metadata)
 			if err != nil {
-				fmt.Printf("Error parsing metadata from file %s: %v\n", filePath, err)
-				continue
+				err_msg := fmt.Sprintf("Error parsing metadata from file %s: %v\n", filePath, err)
+				c.IndentedJSON(http.StatusInternalServerError, gin.H{
+					"error": err_msg,
+				})
+				return
 			}
 			metadata.Body = strings.Join(lines[1:], "\n")
 
@@ -161,7 +179,10 @@ func Build(c *gin.Context, client *redis.Client, ctx context.Context) {
 			postKey := POST_PREFIX + strings.Split(fileName, string(os.PathSeparator))[1]
 			date, err := time.Parse(LAYOUT, metadata.Created)
 			if err != nil {
-				fmt.Println("Error parsing date:", err)
+				err_msg := fmt.Sprintf("Error parsing date: %v", err)
+				c.IndentedJSON(http.StatusInternalServerError, gin.H{
+					"error": err_msg,
+				})
 				return
 			}
 			metadata.ID = strings.Split(fileName, string(os.PathSeparator))[1]
@@ -178,15 +199,21 @@ func Build(c *gin.Context, client *redis.Client, ctx context.Context) {
 			}).Err()
 
 			if err != nil {
-				fmt.Printf("Error saving %s to Redis zset %s: %v\n", postKey, POST_SET, err)
-				continue
+				err_msg := fmt.Sprintf("Error saving %s to Redis zset %s: %v\n", postKey, POST_SET, err)
+				c.IndentedJSON(http.StatusInternalServerError, gin.H{
+					"error": err_msg,
+				})
+				return
 			}
 
 			err = client.Set(ctx, postKey, metadataBytes, 0).Err()
 
 			if err != nil {
-				fmt.Printf("Error saving post to Redis for file %s: %v\n", filePath, err)
-				continue
+				err_msg := fmt.Sprintf("Error saving post to Redis for file %s: %v\n", filePath, err)
+				c.IndentedJSON(http.StatusInternalServerError, gin.H{
+					"error": err_msg,
+				})
+				return
 			}
 
 		}
@@ -276,9 +303,9 @@ func deploy() error {
 		return err
 	}
 
-	fmt.Println(port, deployPath)
 	url := fmt.Sprintf("http://localhost:%s/build", port)
 	resp, err := http.Get(url)
+	fmt.Println(port, deployPath, url)
 	if err != nil {
 		return err
 	}
