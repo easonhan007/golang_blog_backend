@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -233,4 +234,55 @@ func getPostByID(client *redis.Client, ctx context.Context, postID string) (Post
 	json.Unmarshal([]byte(postRaw), &post)
 
 	return post, nil
+}
+
+func Deploy(c *gin.Context) {
+	err := deploy()
+
+	if err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Can not deploy the project, error is %v ", err),
+		})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, gin.H{
+		"message": "deployed! 🚀",
+	})
+}
+
+func deploy() error {
+	deployPath := os.Getenv("DEPLOY_PATH")
+	if deployPath == "" {
+		msg := fmt.Sprintln("DEPLOY_PATH environment variable is not set.")
+		return errors.New(msg)
+	}
+
+	port := os.Getenv("DEPLOY_PORT")
+	if port == "" {
+		msg := fmt.Sprintln("DEPLOY_PORT environment variable is not set.")
+		return errors.New(msg)
+	}
+
+	err := os.Chdir(deployPath)
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command("git", "pull")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err = cmd.Run()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(port, deployPath)
+	url := fmt.Sprintf("http://localhost:%s/build", port)
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
 }

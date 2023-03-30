@@ -49,5 +49,9 @@ func main() {
 		handlers.Build(c, client, ctx)
 	})
 
+	router.GET("/deploy", func(c *gin.Context) {
+		handlers.Deploy(c)
+	})
+
 	router.Run("localhost:8080")
 }
